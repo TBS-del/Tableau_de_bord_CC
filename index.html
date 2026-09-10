@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tableau de bord KPI</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&family=Georgia&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface-0: #EFEDE7; --surface-1: #FFFFFF;
+    --border: #E4E2DA; --border-strong: #C9C6BB;
+    --text-primary: #181816; --text-secondary: #55534C; --text-muted: #8A877D;
+    --accent: #1F5C4A; --green: #1F7A5C; --gold: #B8860B; --red: #A63A2E;
+    --gap: 16px; --pad: 20px;
+  }
+  [data-density="compact"] { --gap: 10px; --pad: 14px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text-primary); font-family: 'Inter', sans-serif; }
+  .app { display: flex; min-height: 100vh; }
+
+  .sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface-1); padding: 20px 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .sidebar-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; padding: 0 6px; }
+  .tree { display: flex; flex-direction: column; gap: 2px; }
+  .tree-node { display: flex; align-items: center; gap: 4px; padding: 7px 6px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .tree-node:hover { background: var(--surface-0); }
+  .tree-node.active { background: var(--accent); color: #F3F7F5; font-weight: 500; }
+  .tree-node .caret { width: 14px; text-align: center; font-size: 10px; opacity: .6; flex-shrink: 0; }
+  .tree-node .caret.empty { visibility: hidden; }
+  .tree-node .node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-node .node-actions { display: none; gap: 2px; flex-shrink: 0; }
+  .tree-node:hover .node-actions, .tree-node.active .node-actions { display: flex; }
+  .tree-node .mini-btn { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 5px; font-size: 11px; background: transparent; border: none; cursor: pointer; color: inherit; opacity: .8; }
+  .tree-node .mini-btn:hover { opacity: 1; background: rgba(0,0,0,.08); }
+  .tree-node.global .node-label::before { content: "Σ "; opacity: .7; }
+  .tree-node input.rename-input { flex: 1; font-size: 13px; font-family: inherit; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border-strong); }
+
+  .content { flex: 1; padding: 28px 32px 60px; min-width: 0; }
+  .wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  h1 { font-family: 'Source Serif Pro', Georgia, serif; font-size: 24px; font-weight: 600; margin: 0 0 var(--header-gap, 8px) 0; }
+  .subtitle { font-size: 13px; color: var(--text-secondary); margin-top: var(--header-gap, 10px); }
+  .header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .header-actions { display: flex; gap: 8px; }
+  .breadcrumb { font-size: 12px; color: var(--text-muted); margin-bottom: var(--header-gap, 4px); }
+  .breadcrumb span:not(:last-child)::after { content: " › "; }
+  .breadcrumb span.current { font-size: 16px; font-weight: 600; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 13px; font-weight: 500; border-radius: 8px; border: none; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .btn-primary { background: var(--accent); color: #F3F7F5; }
+  .btn-ghost { border: 1px solid var(--border-strong); color: var(--text-secondary); background: var(--surface-1); }
+  .btn-ghost:hover { background: var(--surface-0); }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+  .icon-btn:hover { background: var(--surface-0); color: var(--text-primary); }
+  .icon-btn[disabled] { opacity: .3; cursor: default; }
+
+  .blocks-list { display: flex; flex-direction: column; gap: 10px; }
+  .subpage-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .subpage-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-primary); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .subpage-btn:hover { background: var(--surface-0); border-color: var(--accent); }
+  .subpage-btn::after { content: "→"; opacity: .5; }
+  .text-block { position: relative; padding: 4px 0; }
+  .text-block .block-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; background: var(--surface-1); border-radius: 6px; }
+  .text-block:hover .block-actions { display: flex; }
+  .text-block-content { white-space: pre-wrap; line-height: 1.5; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--kpi-card-min, 260px), 1fr)); gap: var(--gap); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--green); border-radius: 12px; padding: var(--kpi-card-pad, var(--pad)); display: flex; flex-direction: column; gap: 10px; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .formula-badge { font-size: 10px; background: var(--surface-0); color: var(--text-secondary); padding: 1px 6px; border-radius: 10px; }
+  .kpi-name { font-size: var(--kpi-title-size, 14px); font-weight: var(--kpi-title-weight, 500); color: var(--text-primary); text-align: var(--kpi-title-align, left); flex: 1; }
+  .value-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .value { font-family: 'IBM Plex Mono', monospace; font-size: var(--kpi-value-size, 28px); font-weight: 500; }
+  .compare-row { display: flex; gap: 18px; }
+  .compare-item { display: flex; flex-direction: column; gap: 2px; }
+  .compare-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+  .compare-value { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 500; }
+  .badge-value { display: inline-block; font-size: 15px; font-weight: 600; padding: 5px 12px; border-radius: 20px; color: #fff; }
+  .delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 500; }
+  .bar-bg { height: 6px; border-radius: 4px; background: var(--surface-0); overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+  .status-row { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; }
+  .sparkline { display: block; margin-top: 2px; }
+  .empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
+
+  .form-card { background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .form-row { display: grid; gap: 12px; }
+  .form-row.two { grid-template-columns: 1fr 1fr; }
+  .form-row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .form-row.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  label.field-label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  input[type=text], input[type=number], input[type=password], select, textarea {
+    width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary); font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  input[type=color] { width: 48px; height: 32px; padding: 2px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-0); }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .checkbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--surface-0); }
+  .checkbox-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-top: 6px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .radio-row { display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap; }
+  .radio-row label { display: flex; align-items: center; gap: 6px; }
+  .inline-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .unit-row { display: flex; gap: 8px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(24,24,22,.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal { background: var(--surface-1); border-radius: 14px; padding: 24px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 14px; max-height: 85vh; overflow-y: auto; }
+  .modal h2 { font-family: 'Source Serif Pro', Georgia, serif; font-size: 18px; margin: 0; }
+  .lock-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-secondary); }
+  .lock-pill.unlocked { background: #E7F3EE; color: var(--green); border-color: var(--green); }
+
+  @media (max-width: 800px) {
+    .app { flex-direction: column; }
+    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 240px; }
+    .form-row.four, .form-row.three { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-title"><span>Pages</span><button class="icon-btn" id="addRootPageBtn" title="Ajouter une page">+</button></div>
+    <div class="tree" id="tree"></div>
+  </aside>
+
+  <main class="content">
+    <div class="wrap">
+      <div class="header-row">
+        <div style="display:flex;align-items:center;">
+          <img id="dashboardLogo" style="display:none;" />
+          <div>
+            <h1 id="dashboardTitle">Tableau de bord</h1>
+            <div class="breadcrumb" id="breadcrumb"></div>
+            <div class="subtitle" id="subtitle">Chargement…</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="lock-pill" id="lockPill">🔒 Lecture seule</div>
+          <button class="icon-btn" id="settingsBtn" title="Réglages" style="border:1px solid var(--border-strong);">⚙︎</button>
+        </div>
+      </div>
+
+      <div class="header-row" style="justify-content:flex-end;">
+        <button class="btn btn-ghost" id="addBlockBtn" style="display:none;">+ Ajouter un texte</button>
+        <button class="btn btn-ghost" id="addImageBtn" style="display:none;">+ Ajouter une image</button>
+        <button class="btn btn-primary" id="addKpiBtn" style="display:none;">+ Ajouter un KPI</button>
+      </div>
+
+      <div class="subpage-buttons" id="subpageButtons"></div>
+
+      <div id="contentFlow"></div>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+// ====== CONFIGURATION — remplace ces deux valeurs par les tiennes (Project Settings → API sur Supabase) ======
+const SUPABASE_URL = "https://shpwwpvtjjbwmdsdmkiv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNocHd3cHZ0ampid21kc2Rta2l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0MDU4NzksImV4cCI6MjEwMDk4MTg3OX0.zRkVL2tJ9XcOfLJHqRGoftm5kSWb951ncPTuK_DvARU";
+// =================================================================================================
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const UNITS = ["", "%", "€", "$", "DT", "j", "unités", "__custom__"];
+const UNIT_LABELS = { "": "aucune", "__custom__": "Personnalisée…" };
+const FONT_SIZES = [
+  { v: 14, l: "Petit" }, { v: 16, l: "Normal" }, { v: 20, l: "Grand" },
+  { v: 26, l: "Titre" }, { v: 34, l: "Grand titre" },
+];
+
+let state = {
+  pages: [], kpis: [], blocks: [], settings: null,
+  activePageId: null, editingId: null, editingBlockId: null,
+  unlocked: sessionStorage.getItem("kpi_unlocked") === "1",
+  expanded: {},
+};
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function nextOrderIndex(pageId) {
+  return state.kpis.filter(k => k.page_id === pageId).length + state.blocks.filter(b => b.page_id === pageId).length;
+}
+function escapeHtml(str) { const div = document.createElement("div"); div.textContent = str ?? ""; return div.innerHTML; }
+
+function formatValue(v, unit) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  const n = Number(v);
+  const formatted = Number.isInteger(n) ? n.toLocaleString("fr-FR") : n.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+  if (unit === "%") return formatted + "%";
+  if (unit) return formatted + " " + unit;
+  return formatted;
+}
+
+function statusFor(kpi) {
+  if (kpi.custom_color) return { color: kpi.custom_color, label: null, auto: false };
+  if (kpi.format === "texte") return { color: "#6B6A63", label: null, auto: false };
+  if (!kpi.has_target || kpi.target == null || kpi.value == null) return { color: "var(--text-primary)", label: null, auto: false };
+  const higherIsBetter = kpi.target >= (kpi.previous ?? kpi.value);
+  const ratio = higherIsBetter ? (kpi.target === 0 ? 1 : kpi.value / kpi.target) : (kpi.target === 0 ? 1 : 2 - kpi.value / kpi.target);
+  if (ratio >= 1) return { color: "var(--green)", label: "Objectif atteint", auto: true };
+  if (ratio >= 0.85) return { color: "var(--gold)", label: "Proche de l'objectif", auto: true };
+  return { color: "var(--red)", label: "En retard", auto: true };
+}
+
+// ---------- Chargement ----------
+function showConnectionError(err) {
+  document.querySelector(".content").innerHTML = `
+    <div style="background:#FAECE9;border:1px solid #A63A2E;border-radius:12px;padding:20px;color:#7A2C22;max-width:600px;">
+      <strong>Impossible de se connecter à la base de données.</strong>
+      <p style="margin:8px 0 0;font-size:14px;">Vérifie SUPABASE_URL / SUPABASE_ANON_KEY, et que les tables existent.</p>
+      <p style="margin:8px 0 0;font-size:12px;color:#8A877D;">Détail technique : ${escapeHtml(err?.message || String(err))}</p>
+    </div>`;
+}
+
+async function loadAll() {
+  const [{ data: pages, error: e1 }, { data: kpis, error: e2 }, { data: blocks, error: e3 }, { data: settingsArr, error: e4 }] = await Promise.all([
+    sb.from("pages").select("*").order("position"),
+    sb.from("kpis").select("*").order("position"),
+    sb.from("blocks").select("*").order("position"),
+    sb.from("settings").select("*").eq("id", 1),
+  ]);
+  const firstError = e1 || e2 || e3 || e4;
+  if (firstError) throw firstError;
+
+  state.pages = pages || [];
+  state.kpis = kpis || [];
+  state.blocks = blocks || [];
+  state.settings = (settingsArr && settingsArr[0]) || { accent_color: "#1F5C4A", density: "comfortable", edit_password: "", dashboard_title: "Tableau de bord" };
+
+  if (state.pages.length === 0 && !state._bootstrapped) {
+    state._bootstrapped = true;
+    const { error: insertError } = await sb.from("pages").insert({ id: uid(), name: "Vue d'ensemble", type: "standard", parent_id: null, position: 0 });
+    if (insertError) throw insertError;
+    return loadAll();
+  }
+  if (!state.activePageId) state.activePageId = state.pages.find(p => !p.parent_id)?.id ?? state.pages[0]?.id ?? null;
+  state.pages.filter(p => !p.parent_id).forEach(p => { if (!(p.id in state.expanded)) state.expanded[p.id] = true; });
+}
+
+function childrenOf(pageId) { return state.pages.filter(p => p.parent_id === pageId).sort((a,b)=>(a.position??0)-(b.position??0)); }
+function rootPages() { return childrenOf(null); }
+function activePage() { return state.pages.find(p => p.id === state.activePageId) || state.pages[0]; }
+
+function pathTo(pageId) {
+  const path = [];
+  let cur = state.pages.find(p => p.id === pageId);
+  while (cur) { path.unshift(cur); cur = cur.parent_id ? state.pages.find(p => p.id === cur.parent_id) : null; }
+  return path;
+}
+
+function descendantsOf(pageId) {
+  const out = []; const stack = [pageId];
+  while (stack.length) { const id = stack.pop(); childrenOf(id).forEach(c => { out.push(c.id); stack.push(c.id); }); }
+  return out;
+}
+
+function computeFormulaValue(kpi, field) {
+  const sources = (kpi.formula_sources || []).map(id => state.kpis.find(k => k.id === id)).filter(Boolean);
+  if (sources.length === 0) return null;
+  if (kpi.formula_op === "weighted_avg") {
+    const weights = kpi.formula_weights || {};
+    let weightedSum = 0, weightTotal = 0;
+    sources.forEach(s => {
+      const w = Number(weights[s.id] ?? 1);
+      weightedSum += Number(s[field] ?? 0) * w;
+      weightTotal += w;
+    });
+    return weightTotal > 0 ? weightedSum / weightTotal : null;
+  }
+  const vals = sources.map(s => Number(s[field] ?? 0));
+  const sum = vals.reduce((a, b) => a + b, 0);
+  return kpi.formula_op === "avg" ? sum / vals.length : sum;
+}
+
+function kpisForPage(pageId) {
+  return state.kpis.filter(k => k.page_id === pageId).sort((a,b)=>(a.position??0)-(b.position??0)).map(k => {
+    if (!k.is_formula) return k;
+    return { ...k, value: computeFormulaValue(k, "value"), previous: null };
+  });
+}
+function blocksForPage(pageId) { return state.blocks.filter(b => b.page_id === pageId).sort((a,b)=>(a.position??0)-(b.position??0)); }
+
+// ---------- Rendu global ----------
+function renderSubpageButtons() {
+  const page = activePage();
+  const el = document.getElementById("subpageButtons");
+  if (!page) { el.innerHTML = ""; return; }
+  const kids = childrenOf(page.id);
+  el.innerHTML = kids.map(k => `<button class="subpage-btn" data-goto="${k.id}">${escapeHtml(k.name)}</button>`).join("");
+  el.querySelectorAll("[data-goto]").forEach(btn => {
+    btn.onclick = () => {
+      const targetId = btn.dataset.goto;
+      state.expanded[page.id] = true;
+      state.activePageId = targetId;
+      state.editingId = null; state.editingBlockId = null;
+      render();
+    };
+  });
+}
+
+function render() {
+  applyTheme();
+  renderLockPill();
+  renderTree();
+  renderBreadcrumb();
+  renderSubpageButtons();
+  renderContentFlow();
+  setSubtitle();
+}
+
+const CARD_SIZE_PRESETS = {
+  xs: { min: "170px", pad: "12px" },
+  sm: { min: "210px", pad: "16px" },
+  md: { min: "260px", pad: "20px" },
+  lg: { min: "340px", pad: "26px" },
+};
+const HEADER_GAPS = { compact: "3px", normal: "8px", large: "18px" };
+
+function applyTheme() {
+  const root = document.documentElement.style;
+  root.setProperty("--accent", state.settings.accent_color || "#1F5C4A");
+  root.setProperty("--bg", state.settings.bg_color || "#F6F5F1");
+  document.body.setAttribute("data-density", state.settings.density || "comfortable");
+  const h1 = document.getElementById("dashboardTitle");
+  h1.textContent = state.settings.dashboard_title || "Tableau de bord";
+  h1.style.fontSize = (state.settings.title_font_size || 24) + "px";
+  h1.style.color = state.settings.title_color || "var(--text-primary)";
+  document.getElementById("subtitle").style.display = state.settings.show_count === false ? "none" : "";
+
+  root.setProperty("--header-gap", HEADER_GAPS[state.settings.header_spacing] || HEADER_GAPS.normal);
+  const preset = CARD_SIZE_PRESETS[state.settings.card_size] || CARD_SIZE_PRESETS.md;
+  root.setProperty("--kpi-card-min", preset.min);
+  root.setProperty("--kpi-card-pad", preset.pad);
+  root.setProperty("--kpi-value-size", (state.settings.kpi_value_size || 28) + "px");
+  root.setProperty("--kpi-title-size", (state.settings.kpi_title_size || 14) + "px");
+  root.setProperty("--kpi-title-weight", state.settings.kpi_title_bold === false ? "400" : "600");
+  root.setProperty("--kpi-title-align", state.settings.kpi_title_center ? "center" : "left");
+
+  const logo = document.getElementById("dashboardLogo");
+  if (state.settings.logo_url) {
+    logo.src = state.settings.logo_url;
+    logo.style.display = "";
+    const sizeMap = { sm: "32px", md: "48px", lg: "72px" };
+    logo.style.height = sizeMap[state.settings.logo_size] || sizeMap.md;
+    logo.style.width = "auto";
+    logo.style.borderRadius = "6px";
+    const gapMap = { compact: "6px", normal: "14px", large: "28px" };
+    logo.style.marginRight = gapMap[state.settings.logo_gap] || gapMap.normal;
+  } else {
+    logo.style.display = "none";
+  }
+}
+function setSubtitle() {
+  const page = activePage();
+  const count = page ? kpisForPage(page.id).length : 0;
+  document.getElementById("subtitle").textContent = `${count} indicateur${count > 1 ? "s" : ""} sur cette page`;
+}
+function renderLockPill() {
+  const pill = document.getElementById("lockPill");
+  pill.className = "lock-pill" + (state.unlocked ? " unlocked" : "");
+  pill.textContent = state.unlocked ? "🔓 Édition activée" : "🔒 Lecture seule";
+  document.getElementById("addBlockBtn").style.display = state.unlocked ? "" : "none";
+  document.getElementById("addImageBtn").style.display = state.unlocked ? "" : "none";
+  document.getElementById("addKpiBtn").style.display = state.unlocked ? "" : "none";
+}
+function renderBreadcrumb() {
+  const page = activePage();
+  const el = document.getElementById("breadcrumb");
+  if (!page) { el.innerHTML = ""; return; }
+  const path = pathTo(page.id);
+  el.innerHTML = path.map((p) => {
+    const styleParts = [];
+    if (p.color) styleParts.push(`color:${p.color}`);
+    styleParts.push(`font-size:${p.title_size || 16}px`);
+    return `<span class="current" style="${styleParts.join(";")};">${escapeHtml(p.name)}</span>`;
+  }).join("");
+}
+
+// ---------- Arborescence ----------
+function renderTree() {
+  const tree = document.getElementById("tree");
+  tree.innerHTML = "";
+  rootPages().forEach(p => tree.appendChild(buildTreeNode(p, 0)));
+}
+function buildTreeNode(page, depth) {
+  const container = document.createElement("div");
+  const kids = childrenOf(page.id);
+  const isExpanded = !!state.expanded[page.id];
+  const row = document.createElement("div");
+  row.className = "tree-node" + (page.id === state.activePageId ? " active" : "") + (page.type === "global" ? " global" : "");
+  row.style.paddingLeft = (6 + depth * 16) + "px";
+  row.innerHTML = `
+    <span class="caret ${kids.length ? "" : "empty"}">${isExpanded ? "▾" : "▸"}</span>
+    <span class="node-label">${escapeHtml(page.name)}</span>
+    <span class="node-actions">
+      ${state.unlocked ? `<button class="mini-btn" data-act="add" title="Ajouter une sous-page">+</button>
+      <button class="mini-btn" data-act="color" title="Couleur du titre">🎨</button>
+      <button class="mini-btn" data-act="rename" title="Renommer">✎</button>
+      <button class="mini-btn" data-act="delete" title="Supprimer">🗑</button>` : ""}
+    </span>`;
+  row.querySelector(".caret").onclick = (e) => { e.stopPropagation(); state.expanded[page.id] = !isExpanded; render(); };
+  row.onclick = () => { state.activePageId = page.id; state.editingId = null; state.editingBlockId = null; render(); };
+  if (state.unlocked) {
+    row.querySelector('[data-act="add"]').onclick = (e) => { e.stopPropagation(); openAddPageModal(page.id); };
+    row.querySelector('[data-act="color"]').onclick = (e) => { e.stopPropagation(); openPageStyleModal(page); };
+    row.querySelector('[data-act="rename"]').onclick = (e) => { e.stopPropagation(); startRenameNode(page, row); };
+    row.querySelector('[data-act="delete"]').onclick = (e) => { e.stopPropagation(); deletePage(page.id); };
+  }
+  container.appendChild(row);
+  if (isExpanded && kids.length) kids.forEach(k => container.appendChild(buildTreeNode(k, depth + 1)));
+  return container;
+}
+function startRenameNode(page, rowEl) {
+  const labelSpan = rowEl.querySelector(".node-label");
+  const input = document.createElement("input");
+  input.type = "text"; input.className = "rename-input"; input.value = page.name;
+  let committed = false;
+  const commit = async () => {
+    if (committed) return; committed = true;
+    const val = input.value.trim();
+    if (val && val !== page.name) {
+      page.name = val;
+      const { error } = await sb.from("pages").update({ name: val }).eq("id", page.id);
+      if (error) alert("Erreur lors du renommage : " + error.message);
+    }
+    render();
+  };
+  input.onblur = commit;
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { committed = true; render(); } };
+  input.onclick = (e) => e.stopPropagation();
+  labelSpan.replaceWith(input); input.focus(); input.select();
+}
+function openPageStyleModal(page) {
+  const el = document.createElement("div");
+  el.className = "modal";
+  el.innerHTML = `
+    <h2>Style du titre de page</h2>
+    <div class="form-row two">
+      <div><label class="field-label">Couleur</label><input type="color" id="ps_color" value="${page.color || '#181816'}"></div>
+      <div><label class="field-label">Taille</label><select id="ps_size">${FONT_SIZES.map(f => `<option value="${f.v}" ${(page.title_size || 16) === f.v ? "selected" : ""}>${f.l}</option>`).join("")}</select></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-ghost" id="ps_cancel">Annuler</button><button class="btn btn-primary" id="ps_save">Enregistrer</button></div>`;
+  el.querySelector("#ps_cancel").onclick = closeModal;
+  el.querySelector("#ps_save").onclick = async () => {
+    const color = el.querySelector("#ps_color").value;
+    const size = parseInt(el.querySelector("#ps_size").value, 10);
+    page.color = color; page.title_size = size;
+    const { error } = await sb.from("pages").update({ color, title_size: size }).eq("id", page.id);
+    if (error) { alert("Erreur : " + error.message); return; }
+    closeModal(); render();
+  };
+  openModal(el);
+}
+
+async function deletePage(id) {
+  const nested = descendantsOf(id);
+  const msg = nested.length ? `Supprimer cette page, ses ${nested.length} sous-page(s) et tous leurs contenus ?` : "Supprimer cette page et tout son contenu ?";
+  if (!confirm(msg)) return;
+  await sb.from("pages").delete().eq("id", id);
+  const toRemove = new Set([id, ...nested]);
+  state.pages = state.pages.filter(p => !toRemove.has(p.id));
+  state.kpis = state.kpis.filter(k => !toRemove.has(k.page_id));
+  state.blocks = state.blocks.filter(b => !toRemove.has(b.page_id));
+  if (toRemove.has(state.activePageId)) state.activePageId = rootPages()[0]?.id ?? state.pages[0]?.id ?? null;
+  render();
+}
+function openAddPageModal(parentId) {
+  const el = document.createElement("div");
+  el.className = "modal";
+  el.innerHTML = `
+    <h2>${parentId ? "Nouvelle sous-page" : "Nouvelle page"}</h2>
+    <div><label class="field-label">Nom</label><input type="text" id="np_name" placeholder="Projet A" autocomplete="off"></div>
+    <div><label class="field-label">Type de page</label>
+      <div class="radio-row">
+        <label><input type="radio" name="np_type" value="standard" checked> Standard (saisie manuelle)</label>
+        <label><input type="radio" name="np_type" value="global"> Globale (calcul automatique)</label>
+      </div>
+    </div>
+    <div class="form-actions"><button class="btn btn-ghost" id="np_cancel">Annuler</button><button class="btn btn-primary" id="np_save">Créer</button></div>`;
+  el.querySelector("#np_cancel").onclick = closeModal;
+  el.querySelector("#np_save").onclick = async () => {
+    const name = el.querySelector("#np_name").value.trim() || "Nouvelle page";
+    const type = el.querySelector('input[name="np_type"]:checked').value;
+    const siblings = childrenOf(parentId);
+    const newPage = { id: uid(), name, type, parent_id: parentId, position: siblings.length };
+    const { error } = await sb.from("pages").insert(newPage);
+    if (error) { alert("Erreur : " + error.message); return; }
+    state.pages.push(newPage);
+    if (parentId) state.expanded[parentId] = true;
+    state.activePageId = newPage.id;
+    closeModal(); render();
+  };
+  openModal(el);
+}
+document.getElementById("addRootPageBtn").onclick = () => { if (state.unlocked) openAddPageModal(null); else openPasswordModal(); };
+
+// ---------- Flux de contenu unifié (KPI + textes + images, dans l'ordre d'ajout) ----------
+function contentItemsForPage(pageId) {
+  const kpis = kpisForPage(pageId).map(k => ({ type: "kpi", order: k.order_index ?? k.position ?? 0, data: k }));
+  const blocks = blocksForPage(pageId).map(b => ({ type: "block", order: b.order_index ?? b.position ?? 0, data: b }));
+  return [...kpis, ...blocks].sort((a, b) => a.order - b.order);
+}
+
+function renderContentFlow() {
+  const container = document.getElementById("contentFlow");
+  container.innerHTML = "";
+  const page = activePage();
+  if (!page) return;
+  const items = contentItemsForPage(page.id);
+
+  let buffer = [];
+  const flushGrid = () => {
+    if (buffer.length === 0) return;
+    const gridDiv = document.createElement("div");
+    gridDiv.className = "grid";
+    // Les éléments sont déjà dans le bon ordre (triés globalement par order_index) — ne pas re-trier ici.
+    buffer.forEach(item => {
+      if (state.editingId === item.data.id) gridDiv.appendChild(buildKpiForm(state.kpis.find(k => k.id === item.data.id)));
+      else gridDiv.appendChild(buildCard(item.data));
+    });
+    container.appendChild(gridDiv);
+    buffer = [];
+  };
+
+  items.forEach(item => {
+    if (item.type === "kpi") { buffer.push(item); return; }
+    flushGrid();
+    if (state.editingBlockId === item.data.id) container.appendChild(buildBlockForm(item.data));
+    else container.appendChild(buildBlockView(item.data));
+  });
+  flushGrid();
+
+  if (state.editingId === "new") container.appendChild(buildKpiForm(null));
+  if (state.editingBlockId === "new") container.appendChild(buildBlockForm(null, state.newBlockType || "text"));
+}
+
+function buildBlockView(b) {
+  const div = document.createElement("div");
+  div.className = "text-block";
+  const inner = b.type === "image"
+    ? `<div style="text-align:${b.align};"><img src="${escapeHtml(b.image_url)}" style="width:${b.width_pct || 60}%;border-radius:8px;"></div>`
+    : `<div class="text-block-content" style="font-size:${b.font_size}px;color:${escapeHtml(b.color)};font-weight:${b.bold ? 700 : 400};text-align:${b.align};">${escapeHtml(b.content)}</div>`;
+  div.innerHTML = `
+    ${inner}
+    <div class="block-actions">
+      ${state.unlocked ? `<button class="icon-btn" data-act="up" title="Monter">↑</button><button class="icon-btn" data-act="down" title="Descendre">↓</button><button class="icon-btn" data-act="edit">✎</button><button class="icon-btn" data-act="delete">🗑</button>` : ""}
+    </div>`;
+  if (state.unlocked) {
+    div.querySelector('[data-act="edit"]').onclick = () => { state.editingBlockId = b.id; render(); };
+    div.querySelector('[data-act="delete"]').onclick = async () => {
+      if (!confirm("Supprimer cet élément ?")) return;
+      await sb.from("blocks").delete().eq("id", b.id);
+      state.blocks = state.blocks.filter(x => x.id !== b.id);
+      render();
+    };
+    div.querySelector('[data-act="up"]').onclick = () => moveItem("block", b.id, "up");
+    div.querySelector('[data-act="down"]').onclick = () => moveItem("block", b.id, "down");
+  }
+  return div;
+}
+function buildBlockForm(initial, forcedType) {
+  const type = initial?.type || forcedType || "text";
+  const wrap = document.createElement("div");
+  wrap.className = "form-card";
+  if (type === "image") {
+    wrap.innerHTML = `
+      <div>
+        <label class="field-label">Image</label>
+        <div id="b_paste_zone" tabindex="0" style="border:2px dashed var(--border-strong);border-radius:10px;padding:18px;text-align:center;font-size:13px;color:var(--text-muted);cursor:pointer;background:var(--surface-0);">
+          📋 Clique ici puis colle une image (Ctrl+V), ou choisis un fichier ci-dessous
+        </div>
+        <input type="file" id="b_file_input" accept="image/*" style="margin-top:8px;">
+        <div id="b_preview_wrap" style="margin-top:10px;${initial?.image_url ? '' : 'display:none;'}">
+          <img id="b_preview" src="${initial ? escapeHtml(initial.image_url || '') : ''}" style="max-width:160px;max-height:100px;border-radius:8px;border:1px solid var(--border);">
+        </div>
+      </div>
+      <div><label class="field-label">Ou coller une URL d'image</label><input type="text" id="b_image_url" placeholder="https://..." value="${initial ? escapeHtml(initial.image_url || '') : ''}" autocomplete="off"></div>
+      <div class="form-row two">
+        <div><label class="field-label">Largeur</label>
+          <select id="b_width">
+            <option value="25" ${initial?.width_pct === 25 ? "selected" : ""}>Petite</option>
+            <option value="50" ${!initial || initial.width_pct === 50 ? "selected" : ""}>Moyenne</option>
+            <option value="75" ${initial?.width_pct === 75 ? "selected" : ""}>Grande</option>
+            <option value="100" ${initial?.width_pct === 100 ? "selected" : ""}>Pleine largeur</option>
+          </select>
+        </div>
+        <div><label class="field-label">Alignement</label>
+          <select id="b_align">
+            <option value="left" ${!initial || initial.align === "left" ? "selected" : ""}>Gauche</option>
+            <option value="center" ${initial?.align === "center" ? "selected" : ""}>Centre</option>
+            <option value="right" ${initial?.align === "right" ? "selected" : ""}>Droite</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" id="b_cancel">✕ Annuler</button>
+        <button class="btn btn-primary" id="b_save">✓ Enregistrer</button>
+      </div>`;
+
+    const urlInput = wrap.querySelector("#b_image_url");
+    const previewWrap = wrap.querySelector("#b_preview_wrap");
+    const preview = wrap.querySelector("#b_preview");
+    function setImage(dataUrl) {
+      urlInput.value = dataUrl;
+      preview.src = dataUrl;
+      previewWrap.style.display = "";
+    }
+    function handleFile(file) {
+      if (!file || !file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = () => setImage(reader.result);
+      reader.readAsDataURL(file);
+    }
+    wrap.querySelector("#b_paste_zone").addEventListener("paste", (e) => {
+      const items = e.clipboardData?.items || [];
+      for (const item of items) {
+        if (item.type.startsWith("image/")) { handleFile(item.getAsFile()); e.preventDefault(); break; }
+      }
+    });
+    wrap.querySelector("#b_file_input").addEventListener("change", (e) => handleFile(e.target.files[0]));
+    urlInput.addEventListener("input", () => { if (urlInput.value.trim()) { preview.src = urlInput.value.trim(); previewWrap.style.display = ""; } });
+
+    wrap.querySelector("#b_cancel").onclick = () => { state.editingBlockId = null; render(); };
+    wrap.querySelector("#b_save").onclick = async () => {
+      const imageUrl = wrap.querySelector("#b_image_url").value.trim();
+      if (!imageUrl) { alert("L'URL de l'image est obligatoire."); return; }
+      const page = activePage();
+      const block = {
+        id: initial ? initial.id : uid(), page_id: page.id, type: "image", content: null,
+        image_url: imageUrl, width_pct: parseInt(wrap.querySelector("#b_width").value, 10),
+        align: wrap.querySelector("#b_align").value, font_size: null, color: null, bold: false,
+        position: initial ? initial.position : state.blocks.filter(b => b.page_id === page.id).length,
+        order_index: initial ? initial.order_index : nextOrderIndex(page.id),
+      };
+      const { error } = await sb.from("blocks").upsert(block);
+      if (error) { alert("Erreur : " + error.message); return; }
+      const idx = state.blocks.findIndex(x => x.id === block.id);
+      if (idx >= 0) state.blocks[idx] = block; else state.blocks.push(block);
+      state.editingBlockId = null;
+      render();
+    };
+    return wrap;
+  }
+  wrap.innerHTML = `
+    <div><label class="field-label">Texte</label><textarea id="b_content" placeholder="Écris ton texte ou commentaire ici...">${initial ? escapeHtml(initial.content) : ""}</textarea></div>
+    <div class="form-row three">
+      <div><label class="field-label">Taille</label><select id="b_size">${FONT_SIZES.map(f => `<option value="${f.v}" ${initial?.font_size === f.v ? "selected" : ""}>${f.l}</option>`).join("")}</select></div>
+      <div><label class="field-label">Couleur</label><input type="color" id="b_color" value="${initial?.color || '#181816'}"></div>
+      <div><label class="field-label">Alignement</label>
+        <select id="b_align">
+          <option value="left" ${!initial || initial.align === "left" ? "selected" : ""}>Gauche</option>
+          <option value="center" ${initial?.align === "center" ? "selected" : ""}>Centre</option>
+          <option value="right" ${initial?.align === "right" ? "selected" : ""}>Droite</option>
+        </select>
+      </div>
+    </div>
+    <label class="inline-check"><input type="checkbox" id="b_bold" ${initial?.bold ? "checked" : ""}> Gras</label>
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="b_cancel">✕ Annuler</button>
+      <button class="btn btn-primary" id="b_save">✓ Enregistrer</button>
+    </div>`;
+  wrap.querySelector("#b_cancel").onclick = () => { state.editingBlockId = null; render(); };
+  wrap.querySelector("#b_save").onclick = async () => {
+    const content = wrap.querySelector("#b_content").value.trim();
+    if (!content) { alert("Le texte est vide."); return; }
+    const page = activePage();
+    const block = {
+      id: initial ? initial.id : uid(), page_id: page.id, type: "text", content, image_url: null, width_pct: null,
+      font_size: parseInt(wrap.querySelector("#b_size").value, 10),
+      color: wrap.querySelector("#b_color").value,
+      bold: wrap.querySelector("#b_bold").checked,
+      align: wrap.querySelector("#b_align").value,
+      position: initial ? initial.position : state.blocks.filter(b => b.page_id === page.id).length,
+    };
+    const { error } = await sb.from("blocks").upsert(block);
+    if (error) { alert("Erreur : " + error.message); return; }
+    const idx = state.blocks.findIndex(x => x.id === block.id);
+    if (idx >= 0) state.blocks[idx] = block; else state.blocks.push(block);
+    state.editingBlockId = null;
+    render();
+  };
+  return wrap;
+}
+document.getElementById("addBlockBtn").onclick = () => { if (!state.unlocked) { openPasswordModal(); return; } state.editingBlockId = "new"; state.newBlockType = "text"; render(); };
+document.getElementById("addImageBtn").onclick = () => { if (!state.unlocked) { openPasswordModal(); return; } state.editingBlockId = "new"; state.newBlockType = "image"; render(); };
+
+// ---------- Formulaire KPI ----------
+function unitOptionsHtml(selected) {
+  return UNITS.map(u => `<option value="${u}" ${selected === u || (u === "__custom__" && !UNITS.includes(selected) && selected) ? "selected" : ""}>${UNIT_LABELS[u] || u}</option>`).join("");
+}
+
+function buildKpiForm(initial) {
+  const page = activePage();
+  const wrap = document.createElement("div");
+  wrap.className = "form-card";
+
+  const formulaMode = initial ? !!initial.is_formula : false;
+  const format = initial?.format || "nombre";
+  const hasTarget = initial ? initial.has_target !== false : true;
+  const hasPrevious = initial ? initial.previous != null : false;
+  const useCustomColor = !!initial?.custom_color;
+  const knownUnit = initial && UNITS.includes(initial.unit) ? initial.unit : (initial?.unit ? "__custom__" : "");
+
+  wrap.innerHTML = `
+    <div><label class="field-label">Nom du KPI</label><input type="text" id="f_name" placeholder="Chiffre d'affaires" value="${initial ? escapeHtml(initial.name) : ''}" autocomplete="off"></div>
+
+    <div>
+      <label class="field-label">Format d'affichage</label>
+      <div class="radio-row">
+        <label><input type="radio" name="f_format" value="nombre" ${format === "nombre" ? "checked" : ""}> Nombre</label>
+        <label><input type="radio" name="f_format" value="montant" ${format === "montant" ? "checked" : ""}> Montant</label>
+        <label><input type="radio" name="f_format" value="pourcentage" ${format === "pourcentage" ? "checked" : ""}> Pourcentage</label>
+        <label><input type="radio" name="f_format" value="texte" ${format === "texte" ? "checked" : ""}> Texte / Statut</label>
+        <label><input type="radio" name="f_format" value="prevu_realise" ${format === "prevu_realise" ? "checked" : ""}> Comparaison (2 valeurs)</label>
+      </div>
+    </div>
+
+    <div class="radio-row">
+      <label><input type="radio" name="f_mode" value="manual" ${!formulaMode ? "checked" : ""}> Saisie manuelle</label>
+      <label><input type="radio" name="f_mode" value="formula" ${formulaMode ? "checked" : ""}> Calculé automatiquement</label>
+    </div>
+
+    <div id="manualFields" style="${formulaMode ? "display:none;" : ""}">
+      <div id="unitBlock" class="unit-row" style="margin-bottom:10px;">
+        <div style="flex:1;"><label class="field-label">Unité</label><select id="f_unit">${unitOptionsHtml(knownUnit)}</select></div>
+        <div id="unitCustomWrap" style="flex:1;display:${knownUnit === "__custom__" ? "" : "none"};"><label class="field-label">Unité personnalisée</label><input type="text" id="f_unit_custom" placeholder="ex : pts, dossiers..." value="${knownUnit === "__custom__" ? escapeHtml(initial.unit) : ""}" autocomplete="off"></div>
+      </div>
+
+      <div id="simpleBlock" style="display:${format === "nombre" || format === "montant" || format === "pourcentage" ? "" : "none"};">
+        <label class="field-label">Valeur</label><input type="number" id="f_value" value="${initial && !initial.is_formula && (initial.format === 'nombre' || initial.format === 'montant' || initial.format === 'pourcentage') ? initial.value : ''}">
+        <label class="inline-check" style="margin-top:10px;"><input type="checkbox" id="f_hasTarget" ${hasTarget ? "checked" : ""}> Ce KPI a un objectif chiffré</label>
+        <div id="targetWrap" style="margin-top:8px;"><label class="field-label">Objectif</label><input type="number" id="f_target" value="${initial ? initial.target ?? '' : ''}"></div>
+        <label class="inline-check" style="margin-top:8px;"><input type="checkbox" id="f_hasPrevious" ${hasPrevious ? "checked" : ""}> Comparer à une valeur précédente</label>
+        <div id="previousWrap" style="margin-top:8px;"><label class="field-label">Valeur précédente</label><input type="number" id="f_previous" value="${hasPrevious ? initial.previous : ''}"></div>
+        <div id="historyWrap" style="margin-top:8px;"><label class="field-label">Historique (graphique — valeurs séparées par virgules)</label><input type="text" id="f_history" placeholder="10,12,9,15,18" value="${initial?.history ? initial.history.join(',') : ''}"></div>
+      </div>
+
+      <div id="compareBlock" style="display:${format === "prevu_realise" ? "" : "none"};">
+        <div class="form-row two" style="margin-bottom:10px;">
+          <div><label class="field-label">Libellé de la 1ère valeur</label><input type="text" id="f_label_left" placeholder="Prévu, Prévisionnel, Total..." value="${initial?.compare_label_left || 'Prévu'}" autocomplete="off"></div>
+          <div><label class="field-label">Libellé de la 2ème valeur</label><input type="text" id="f_label_right" placeholder="Réalisé, Consommé, Résolu..." value="${initial?.compare_label_right || 'Réalisé'}" autocomplete="off"></div>
+        </div>
+        <div class="form-row two">
+          <div><label class="field-label" id="f_prevu_label">Valeur (1ère)</label><input type="number" id="f_prevu" value="${initial && initial.format === 'prevu_realise' ? initial.target ?? '' : ''}"></div>
+          <div><label class="field-label" id="f_realise_label">Valeur (2ème)</label><input type="number" id="f_realise" value="${initial && initial.format === 'prevu_realise' ? initial.value ?? '' : ''}"></div>
+        </div>
+      </div>
+
+      <div id="textBlock" style="display:${format === "texte" ? "" : "none"};">
+        <label class="field-label">Valeur(s) — une par ligne (chacune s'affichera dans son propre cadre)</label>
+        <textarea id="f_value_text" placeholder="Ex :&#10;Ahmed Ben Salah&#10;Sami Trabelsi&#10;Nour Gharbi" autocomplete="off">${initial && initial.format === 'texte' ? escapeHtml(initial.value_text || '') : ''}</textarea>
+      </div>
+
+      <label class="inline-check" style="margin-top:12px;" id="colorCheckWrap">
+        <input type="checkbox" id="f_useColor" ${useCustomColor || format === "texte" ? "checked" : ""} ${format === "texte" ? "disabled" : ""}> Couleur personnalisée (remplace la couleur automatique)
+      </label>
+      <div id="colorWrap" style="margin-top:8px;display:${useCustomColor || format === "texte" ? "" : "none"};">
+        <input type="color" id="f_color" value="${initial?.custom_color || '#A63A2E'}">
+      </div>
+    </div>
+
+    <div id="formulaFields" style="${formulaMode ? "" : "display:none;"}">
+      <div class="form-row two">
+        <div><label class="field-label">Opération</label>
+          <div class="radio-row">
+            <label><input type="radio" name="f_op" value="sum" ${!initial?.formula_op || initial.formula_op === 'sum' ? "checked" : ""}> Somme</label>
+            <label><input type="radio" name="f_op" value="avg" ${initial?.formula_op === 'avg' ? "checked" : ""}> Moyenne</label>
+            <label><input type="radio" name="f_op" value="weighted_avg" ${initial?.formula_op === 'weighted_avg' ? "checked" : ""}> Moyenne pondérée</label>
+          </div>
+        </div>
+        <div><label class="field-label">Unité</label><select id="f_unit_formula">${unitOptionsHtml(knownUnit)}</select></div>
+        <div id="unitCustomWrapFormula" style="display:${knownUnit === "__custom__" ? "" : "none"};margin-top:8px;"><label class="field-label">Unité personnalisée</label><input type="text" id="f_unit_custom_formula" placeholder="ex : pts, dossiers..." value="${knownUnit === "__custom__" ? escapeHtml(initial.unit) : ""}" autocomplete="off"></div>
+      </div>
+      <label class="inline-check" style="margin-top:10px;"><input type="checkbox" id="f_hasTarget_formula" ${hasTarget ? "checked" : ""}> Ce KPI a un objectif chiffré</label>
+      <div id="targetWrapFormula" style="margin-top:8px;display:${hasTarget ? "" : "none"};"><label class="field-label">Objectif</label><input type="number" id="f_target_formula" value="${initial ? initial.target ?? '' : ''}"></div>
+      <label class="inline-check" style="margin-top:10px;"><input type="checkbox" id="f_useColor_formula" ${useCustomColor ? "checked" : ""}> Couleur personnalisée</label>
+      <div id="colorWrapFormula" style="margin-top:8px;display:${useCustomColor ? "" : "none"};"><input type="color" id="f_color_formula" value="${initial?.custom_color || '#1F5C4A'}"></div>
+      <label class="field-label" style="margin-top:12px;">KPIs à agréger (depuis n'importe quelle page)</label>
+      <div class="checkbox-list" id="sourceList"></div>
+    </div>
+
+    <div>
+      <label class="field-label">Champs personnalisés (facultatif)</label>
+      <div id="customFieldsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <button type="button" class="btn btn-ghost" id="addCustomField" style="margin-top:8px;">+ Ajouter un champ</button>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="f_cancel">✕ Annuler</button>
+      <button class="btn btn-primary" id="f_save">✓ Enregistrer</button>
+    </div>`;
+
+  const simpleBlock = wrap.querySelector("#simpleBlock");
+  const compareBlock = wrap.querySelector("#compareBlock");
+  const textBlock = wrap.querySelector("#textBlock");
+  const unitBlock = wrap.querySelector("#unitBlock");
+  const hasTargetCb = wrap.querySelector("#f_hasTarget");
+  const hasPreviousCb = wrap.querySelector("#f_hasPrevious");
+  const targetWrap = wrap.querySelector("#targetWrap");
+  const previousWrap = wrap.querySelector("#previousWrap");
+  const useColorCb = wrap.querySelector("#f_useColor");
+  const colorWrap = wrap.querySelector("#colorWrap");
+  const unitSelect = wrap.querySelector("#f_unit");
+  const unitCustomWrap = wrap.querySelector("#unitCustomWrap");
+
+  function updateFormatUI() {
+    const fmt = wrap.querySelector('input[name="f_format"]:checked').value;
+    simpleBlock.style.display = (fmt === "nombre" || fmt === "montant" || fmt === "pourcentage") ? "" : "none";
+    compareBlock.style.display = fmt === "prevu_realise" ? "" : "none";
+    textBlock.style.display = fmt === "texte" ? "" : "none";
+    unitBlock.style.display = fmt === "texte" ? "none" : "";
+    if (fmt === "pourcentage") unitSelect.value = "%";
+    if (fmt === "texte") { useColorCb.checked = true; useColorCb.disabled = true; colorWrap.style.display = ""; }
+    else { useColorCb.disabled = false; colorWrap.style.display = useColorCb.checked ? "" : "none"; }
+  }
+  wrap.querySelectorAll('input[name="f_format"]').forEach(r => r.onchange = updateFormatUI);
+  const labelLeftInput = wrap.querySelector("#f_label_left");
+  const labelRightInput = wrap.querySelector("#f_label_right");
+  if (labelLeftInput) labelLeftInput.oninput = () => { wrap.querySelector("#f_prevu_label").textContent = "Valeur — " + (labelLeftInput.value.trim() || "1ère"); };
+  if (labelRightInput) labelRightInput.oninput = () => { wrap.querySelector("#f_realise_label").textContent = "Valeur — " + (labelRightInput.value.trim() || "2ème"); };
+  hasTargetCb.onchange = () => { targetWrap.style.display = hasTargetCb.checked ? "" : "none"; };
+  hasPreviousCb.onchange = () => { previousWrap.style.display = hasPreviousCb.checked ? "" : "none"; };
+  useColorCb.onchange = () => { colorWrap.style.display = useColorCb.checked ? "" : "none"; };
+  unitSelect.onchange = () => { unitCustomWrap.style.display = unitSelect.value === "__custom__" ? "" : "none"; };
+  targetWrap.style.display = hasTargetCb.checked ? "" : "none";
+  previousWrap.style.display = hasPreviousCb.checked ? "" : "none";
+  updateFormatUI();
+
+  {
+    const manualFields = wrap.querySelector("#manualFields");
+    const formulaFields = wrap.querySelector("#formulaFields");
+    wrap.querySelectorAll('input[name="f_mode"]').forEach(r => {
+      r.onchange = () => {
+        const isFormula = wrap.querySelector('input[name="f_mode"]:checked').value === "formula";
+        manualFields.style.display = isFormula ? "none" : "";
+        formulaFields.style.display = isFormula ? "" : "none";
+      };
+    });
+    const sourceListEl = wrap.querySelector("#sourceList");
+    renderSourceList(sourceListEl, initial?.formula_sources || [], initial?.formula_weights || {});
+    const opRadios = wrap.querySelectorAll('input[name="f_op"]');
+    const syncWeightVisibility = () => toggleWeightInputs(sourceListEl, wrap.querySelector('input[name="f_op"]:checked').value === "weighted_avg");
+    opRadios.forEach(r => r.onchange = syncWeightVisibility);
+    syncWeightVisibility();
+    const hasTargetFormulaCb = wrap.querySelector("#f_hasTarget_formula");
+    const targetWrapFormula = wrap.querySelector("#targetWrapFormula");
+    hasTargetFormulaCb.onchange = () => { targetWrapFormula.style.display = hasTargetFormulaCb.checked ? "" : "none"; };
+    const useColorFormulaCb = wrap.querySelector("#f_useColor_formula");
+    const colorWrapFormula = wrap.querySelector("#colorWrapFormula");
+    useColorFormulaCb.onchange = () => { colorWrapFormula.style.display = useColorFormulaCb.checked ? "" : "none"; };
+    const unitSelectFormula = wrap.querySelector("#f_unit_formula");
+    const unitCustomWrapFormula = wrap.querySelector("#unitCustomWrapFormula");
+    unitSelectFormula.onchange = () => { unitCustomWrapFormula.style.display = unitSelectFormula.value === "__custom__" ? "" : "none"; };
+  }
+
+  const customList = wrap.querySelector("#customFieldsList");
+  function addCustomFieldRow(label = "", value = "") {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;";
+    row.innerHTML = `<input type="text" class="cf_label" placeholder="Nom du champ" value="${escapeHtml(label)}" style="flex:1;"><input type="text" class="cf_value" placeholder="Valeur" value="${escapeHtml(value)}" style="flex:1;"><button type="button" class="icon-btn cf_remove">✕</button>`;
+    row.querySelector(".cf_remove").onclick = () => row.remove();
+    customList.appendChild(row);
+  }
+  (initial?.custom_fields || []).forEach(f => addCustomFieldRow(f.label, f.value));
+  wrap.querySelector("#addCustomField").onclick = () => addCustomFieldRow();
+
+  wrap.querySelector("#f_cancel").onclick = () => { state.editingId = null; render(); };
+  wrap.querySelector("#f_save").onclick = () => saveKpiFromForm(wrap, initial);
+  return wrap;
+}
+
+function collectCustomFields(wrap) {
+  return Array.from(wrap.querySelectorAll("#customFieldsList > div")).map(row => ({
+    label: row.querySelector(".cf_label").value.trim(), value: row.querySelector(".cf_value").value.trim(),
+  })).filter(f => f.label);
+}
+function resolveUnit(wrap, selectId = "f_unit", customId = "f_unit_custom") {
+  const sel = wrap.querySelector("#" + selectId).value;
+  if (sel === "__custom__") { const c = wrap.querySelector("#" + customId); return c ? c.value.trim() : ""; }
+  return sel;
+}
+function renderSourceList(container, selectedIds, weights) {
+  container.innerHTML = "";
+  state.pages.forEach(p => {
+    const kpis = state.kpis.filter(k => k.page_id === p.id && !k.is_formula);
+    if (kpis.length === 0) return;
+    const title = document.createElement("div");
+    title.className = "checkbox-group-title";
+    title.textContent = pathTo(p.id).map(x => x.name).join(" › ");
+    container.appendChild(title);
+    kpis.forEach(k => {
+      const row = document.createElement("label");
+      row.className = "checkbox-row";
+      const w = weights[k.id] ?? 1;
+      row.innerHTML = `<input type="checkbox" value="${k.id}" ${selectedIds.includes(k.id) ? "checked" : ""}> <span style="flex:1;">${escapeHtml(k.name)}</span> <input type="number" class="source-weight" data-kpi-id="${k.id}" value="${w}" step="0.1" style="width:64px;display:none;" title="Coefficient">`;
+      container.appendChild(row);
+    });
+  });
+  if (container.children.length === 0) container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Aucun autre KPI disponible pour l\'instant.</div>';
+}
+
+function toggleWeightInputs(container, show) {
+  container.querySelectorAll(".source-weight").forEach(inp => { inp.style.display = show ? "inline-block" : "none"; });
+}
+
+async function saveKpiFromForm(wrap, initial) {
+  const name = wrap.querySelector("#f_name").value.trim();
+  if (!name) { alert("Le nom du KPI est obligatoire."); return; }
+
+  const format = wrap.querySelector('input[name="f_format"]:checked').value;
+  const mode = wrap.querySelector('input[name="f_mode"]:checked').value;
+  const page = activePage();
+  const customFields = collectCustomFields(wrap);
+  const useColor = wrap.querySelector("#f_useColor").checked;
+  const color = useColor ? wrap.querySelector("#f_color").value : null;
+
+  let kpi;
+  if (mode === "formula") {
+    const sources = Array.from(wrap.querySelectorAll('#sourceList input[type=checkbox]:checked')).map(c => c.value);
+    const op = wrap.querySelector('input[name="f_op"]:checked').value;
+    const weights = {};
+    sources.forEach(id => {
+      const inp = wrap.querySelector(`.source-weight[data-kpi-id="${id}"]`);
+      weights[id] = inp ? (parseFloat(inp.value) || 1) : 1;
+    });
+    const hasTargetFormula = wrap.querySelector("#f_hasTarget_formula").checked;
+    const useColorFormula = wrap.querySelector("#f_useColor_formula").checked;
+    kpi = {
+      id: initial ? initial.id : uid(), page_id: page.id, name, format: "nombre",
+      is_formula: true, formula_op: op, formula_sources: sources, formula_weights: weights,
+      has_target: hasTargetFormula, target: hasTargetFormula ? (parseFloat(wrap.querySelector("#f_target_formula").value) || null) : null,
+      value: null, value_text: null, previous: null, unit: resolveUnit(wrap, "f_unit_formula", "f_unit_custom_formula"), history: [],
+      custom_color: useColorFormula ? wrap.querySelector("#f_color_formula").value : null, custom_fields: customFields,
+      position: initial ? initial.position : state.kpis.filter(k => k.page_id === page.id).length,
+      order_index: initial ? initial.order_index : nextOrderIndex(page.id),
+    };
+  } else if (format === "texte") {
+    const valueText = wrap.querySelector("#f_value_text").value.trim();
+    if (!valueText) { alert("La valeur (texte) est obligatoire."); return; }
+    kpi = {
+      id: initial ? initial.id : uid(), page_id: page.id, name, format,
+      is_formula: false, formula_op: null, formula_sources: [],
+      has_target: false, target: null, value: null, value_text: valueText, previous: null, unit: "",
+      history: [], custom_color: wrap.querySelector("#f_color").value,
+      custom_fields: customFields,
+      position: initial ? initial.position : state.kpis.filter(k => k.page_id === page.id).length,
+      order_index: initial ? initial.order_index : nextOrderIndex(page.id),
+    };
+  } else if (format === "prevu_realise") {
+    const prevu = wrap.querySelector("#f_prevu").value;
+    const realise = wrap.querySelector("#f_realise").value;
+    if (prevu === "" || realise === "") { alert("Les deux valeurs sont obligatoires."); return; }
+    kpi = {
+      id: initial ? initial.id : uid(), page_id: page.id, name, format,
+      is_formula: false, formula_op: null, formula_sources: [],
+      has_target: true, target: parseFloat(prevu), value: parseFloat(realise), value_text: null, previous: null,
+      unit: resolveUnit(wrap), history: [], custom_color: color, custom_fields: customFields,
+      compare_label_left: wrap.querySelector("#f_label_left").value.trim() || "Prévu",
+      compare_label_right: wrap.querySelector("#f_label_right").value.trim() || "Réalisé",
+      position: initial ? initial.position : state.kpis.filter(k => k.page_id === page.id).length,
+      order_index: initial ? initial.order_index : nextOrderIndex(page.id),
+    };
+  } else {
+    const value = wrap.querySelector("#f_value").value;
+    if (value === "") { alert("La valeur est obligatoire."); return; }
+    const hasTarget = wrap.querySelector("#f_hasTarget").checked;
+    const hasPrevious = wrap.querySelector("#f_hasPrevious").checked;
+    const historyRaw = wrap.querySelector("#f_history").value.trim();
+    kpi = {
+      id: initial ? initial.id : uid(), page_id: page.id, name, format,
+      is_formula: false, formula_op: null, formula_sources: [],
+      has_target: hasTarget, value: parseFloat(value), value_text: null,
+      previous: hasPrevious ? parseFloat(wrap.querySelector("#f_previous").value) : null,
+      target: hasTarget ? (parseFloat(wrap.querySelector("#f_target").value) || null) : null,
+      unit: format === "pourcentage" ? "%" : resolveUnit(wrap),
+      history: historyRaw ? historyRaw.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n)) : [],
+      custom_color: color, custom_fields: customFields,
+      position: initial ? initial.position : state.kpis.filter(k => k.page_id === page.id).length,
+      order_index: initial ? initial.order_index : nextOrderIndex(page.id),
+    };
+  }
+
+  const { error } = await sb.from("kpis").upsert(kpi);
+  if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
+  const idx = state.kpis.findIndex(k => k.id === kpi.id);
+  if (idx >= 0) state.kpis[idx] = kpi; else state.kpis.push(kpi);
+  state.editingId = null;
+  render();
+}
+
+// ---------- Cartes KPI ----------
+function sparklineSvg(history, color) {
+  if (!history || history.length < 2) return "";
+  const w = 100, h = 28, pad = 3;
+  const min = Math.min(...history), max = Math.max(...history);
+  const range = max - min || 1;
+  const pts = history.map((v, i) => {
+    const x = pad + (i / (history.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${x},${y}`;
+  }).join(" ");
+  return `<svg class="sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function buildCard(kpi) {
+  const s = statusFor(kpi);
+  const isText = kpi.format === "texte";
+  const isCompare = kpi.format === "prevu_realise";
+  const delta = (!isText && !isCompare && kpi.previous != null && kpi.value != null) ? ((kpi.value - kpi.previous) / Math.abs(kpi.previous || 1)) * 100 : 0;
+  const deltaUp = delta > 0.05, deltaDown = delta < -0.05;
+  const deltaColor = deltaUp ? "var(--green)" : deltaDown ? "var(--red)" : "var(--text-muted)";
+  const arrow = deltaUp ? "▲" : deltaDown ? "▼" : "–";
+  const showBar = kpi.has_target && kpi.target != null && kpi.value != null;
+  const pct = showBar ? Math.min(100, Math.max(0, (kpi.value / kpi.target) * 100)) : 0;
+
+  const customRows = (kpi.custom_fields || []).map(f =>
+    `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);"><span>${escapeHtml(f.label)}</span><span style="font-weight:500;color:var(--text-primary);">${escapeHtml(f.value)}</span></div>`
+  ).join("");
+
+  let valueBlockHtml;
+  if (isText) {
+    const items = (kpi.value_text || "").split("\n").map(s => s.trim()).filter(Boolean);
+    valueBlockHtml = items.length > 1
+      ? `<div style="display:flex;flex-direction:column;gap:6px;width:100%;">${items.map(t => `<span class="badge-value" style="background:${s.color};text-align:center;">${escapeHtml(t)}</span>`).join("")}</div>`
+      : `<span class="badge-value" style="background:${s.color};">${escapeHtml(items[0] || "—")}</span>`;
+  } else if (isCompare) {
+    valueBlockHtml = `<div class="compare-row">
+      <div class="compare-item"><span class="compare-label">${escapeHtml(kpi.compare_label_left || "Prévu")}</span><span class="compare-value">${formatValue(kpi.target, kpi.unit)}</span></div>
+      <div class="compare-item"><span class="compare-label">${escapeHtml(kpi.compare_label_right || "Réalisé")}</span><span class="compare-value" style="color:${s.color};">${formatValue(kpi.value, kpi.unit)}</span></div>
+    </div>`;
+  } else {
+    valueBlockHtml = `<span class="value" style="color:${s.color !== 'var(--text-primary)' ? s.color : 'inherit'};">${formatValue(kpi.value, kpi.unit)}</span>
+      ${kpi.previous != null ? `<span class="delta" style="color:${deltaColor}">${arrow} ${Math.abs(delta).toFixed(1)}%</span>` : ""}`;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.borderLeftColor = s.color === "var(--text-primary)" ? "var(--border-strong)" : s.color;
+  card.dataset.kpiId = kpi.id;
+  card.innerHTML = `
+    <div class="card-top">
+      <div class="kpi-name">${escapeHtml(kpi.name)} ${kpi.is_formula ? '<span class="formula-badge">Σ calculé</span>' : ""}</div>
+      <div style="display:flex;gap:4px;">
+        ${state.unlocked ? `<button class="icon-btn" data-action="up" title="Monter">↑</button><button class="icon-btn" data-action="down" title="Descendre">↓</button><button class="icon-btn" data-action="duplicate" title="Dupliquer">⧉</button><button class="icon-btn" data-action="edit" title="Modifier">✎</button><button class="icon-btn" data-action="delete" title="Supprimer">🗑</button>` : ""}
+      </div>
+    </div>
+    <div class="value-row">${valueBlockHtml}</div>
+    ${sparklineSvg(kpi.history, s.color === "var(--text-primary)" ? "var(--accent)" : s.color)}
+    ${showBar && !isCompare ? `
+    <div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${s.color};"></div></div>
+      <div class="status-row"><span style="color:${s.color};font-weight:500;">${s.label || ''}</span><span style="color:var(--text-muted);">Objectif : ${formatValue(kpi.target, kpi.unit)}</span></div>
+    </div>` : ""}
+    ${showBar && isCompare ? `
+    <div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${s.color};"></div></div>
+      <div class="status-row"><span style="color:${s.color};font-weight:500;">Taux de réalisation : ${pct.toFixed(0)}%</span></div>
+    </div>` : ""}
+    ${customRows ? `<div style="display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--border);padding-top:8px;">${customRows}</div>` : ""}`;
+  if (state.unlocked) {
+    card.querySelector('[data-action="edit"]').onclick = () => { state.editingId = kpi.id; render(); };
+    card.querySelector('[data-action="delete"]').onclick = async () => {
+      if (!confirm("Supprimer ce KPI ?")) return;
+      await sb.from("kpis").delete().eq("id", kpi.id);
+      state.kpis = state.kpis.filter(k => k.id !== kpi.id);
+      render();
+    };
+    card.querySelector('[data-action="up"]').onclick = () => moveItem("kpi", kpi.id, "up");
+    card.querySelector('[data-action="down"]').onclick = () => moveItem("kpi", kpi.id, "down");
+    card.querySelector('[data-action="duplicate"]').onclick = () => openDuplicateModal(kpi);
+  }
+  return card;
+}
+
+function openDuplicateModal(kpi) {
+  const el = document.createElement("div");
+  el.className = "modal";
+  const options = state.pages.map(p => `<option value="${p.id}" ${p.id === state.activePageId ? "selected" : ""}>${escapeHtml(pathTo(p.id).map(x => x.name).join(" › "))}</option>`).join("");
+  el.innerHTML = `
+    <h2>Dupliquer "${escapeHtml(kpi.name)}"</h2>
+    <div><label class="field-label">Vers quelle page ?</label><select id="dup_page">${options}</select></div>
+    <div class="form-actions"><button class="btn btn-ghost" id="dup_cancel">Annuler</button><button class="btn btn-primary" id="dup_save">Dupliquer</button></div>`;
+  el.querySelector("#dup_cancel").onclick = closeModal;
+  el.querySelector("#dup_save").onclick = async () => {
+    const targetPageId = el.querySelector("#dup_page").value;
+    const original = state.kpis.find(k => k.id === kpi.id);
+    const copy = { ...original, id: uid(), page_id: targetPageId,
+      position: state.kpis.filter(k => k.page_id === targetPageId).length,
+      order_index: nextOrderIndex(targetPageId) };
+    const { error } = await sb.from("kpis").insert(copy);
+    if (error) { alert("Erreur : " + error.message); return; }
+    state.kpis.push(copy);
+    state.activePageId = targetPageId;
+    closeModal(); render();
+  };
+  openModal(el);
+}
+
+async function moveItem(itemType, itemId, direction) {
+  const page = activePage();
+  const items = contentItemsForPage(page.id);
+  const idx = items.findIndex(it => it.type === itemType && it.data.id === itemId);
+  if (idx === -1) return;
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= items.length) return;
+  const itemA = items[idx], itemB = items[swapIdx];
+  const table = (t) => (t === "kpi" ? "kpis" : "blocks");
+  const realA = itemA.type === "kpi" ? state.kpis.find(k => k.id === itemA.data.id) : state.blocks.find(b => b.id === itemA.data.id);
+  const realB = itemB.type === "kpi" ? state.kpis.find(k => k.id === itemB.data.id) : state.blocks.find(b => b.id === itemB.data.id);
+  const orderA = itemA.order, orderB = itemB.order;
+  realA.order_index = orderB;
+  realB.order_index = orderA;
+  render();
+  await Promise.all([
+    sb.from(table(itemA.type)).update({ order_index: orderB }).eq("id", realA.id),
+    sb.from(table(itemB.type)).update({ order_index: orderA }).eq("id", realB.id),
+  ]);
+}
+
+// ---------- Modal générique ----------
+function openModal(el) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = "";
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  overlay.appendChild(el);
+  root.appendChild(overlay);
+}
+function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+
+// ---------- Déverrouillage ----------
+function openPasswordModal() {
+  const el = document.createElement("div");
+  el.className = "modal";
+  el.innerHTML = `
+    <h2>Déverrouiller l'édition</h2>
+    <div><label class="field-label">Mot de passe</label><input type="password" id="pw_input"></div>
+    <div id="pw_error" style="color:var(--red);font-size:12px;display:none;">Mot de passe incorrect.</div>
+    <div class="form-actions"><button class="btn btn-ghost" id="pw_cancel">Annuler</button><button class="btn btn-primary" id="pw_submit">Déverrouiller</button></div>`;
+  el.querySelector("#pw_cancel").onclick = closeModal;
+  el.querySelector("#pw_submit").onclick = () => {
+    const val = el.querySelector("#pw_input").value;
+    if (val === state.settings.edit_password) { state.unlocked = true; sessionStorage.setItem("kpi_unlocked", "1"); closeModal(); render(); }
+    else el.querySelector("#pw_error").style.display = "block";
+  };
+  el.querySelector("#pw_input").onkeydown = (e) => { if (e.key === "Enter") el.querySelector("#pw_submit").click(); };
+  openModal(el);
+  el.querySelector("#pw_input").focus();
+}
+
+// ---------- Réglages ----------
+function openSettingsModal() {
+  const el = document.createElement("div");
+  el.className = "modal";
+  el.innerHTML = `
+    <h2>Réglages du tableau de bord</h2>
+    <div><label class="field-label">Titre du tableau de bord</label><input type="text" id="s_title" value="${escapeHtml(state.settings.dashboard_title || 'Tableau de bord')}" autocomplete="off"></div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;">
+      <label class="field-label" style="font-weight:600;">Logo (affiché à côté du titre, sur toutes les pages)</label>
+      <div id="s_logo_paste_zone" tabindex="0" style="border:2px dashed var(--border-strong);border-radius:10px;padding:14px;text-align:center;font-size:13px;color:var(--text-muted);cursor:pointer;background:var(--surface-0);margin-top:8px;">
+        📋 Clique puis colle un logo (Ctrl+V), ou choisis un fichier
+      </div>
+      <input type="file" id="s_logo_file" accept="image/*" style="margin-top:8px;">
+      <div id="s_logo_preview_wrap" style="margin-top:8px;${state.settings.logo_url ? '' : 'display:none;'}">
+        <img id="s_logo_preview" src="${state.settings.logo_url ? escapeHtml(state.settings.logo_url) : ''}" style="max-height:60px;border-radius:6px;">
+        <button type="button" class="btn btn-ghost" id="s_logo_remove" style="margin-left:10px;">Retirer le logo</button>
+      </div>
+      <input type="hidden" id="s_logo_url" value="${state.settings.logo_url ? escapeHtml(state.settings.logo_url) : ''}">
+      <div class="form-row two" style="margin-top:10px;">
+        <div><label class="field-label">Taille du logo</label>
+          <select id="s_logo_size">
+            <option value="sm" ${state.settings.logo_size === 'sm' ? 'selected' : ''}>Petit</option>
+            <option value="md" ${!state.settings.logo_size || state.settings.logo_size === 'md' ? 'selected' : ''}>Moyen</option>
+            <option value="lg" ${state.settings.logo_size === 'lg' ? 'selected' : ''}>Grand</option>
+          </select>
+        </div>
+        <div><label class="field-label">Rapprochement du titre</label>
+          <select id="s_logo_gap">
+            <option value="compact" ${state.settings.logo_gap === 'compact' ? 'selected' : ''}>Rapproché</option>
+            <option value="normal" ${!state.settings.logo_gap || state.settings.logo_gap === 'normal' ? 'selected' : ''}>Normal</option>
+            <option value="large" ${state.settings.logo_gap === 'large' ? 'selected' : ''}>Éloigné</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="form-row three">
+      <div><label class="field-label">Taille du titre</label><select id="s_title_size">${FONT_SIZES.map(f => `<option value="${f.v}" ${(state.settings.title_font_size || 24) === f.v ? "selected" : ""}>${f.l}</option>`).join("")}</select></div>
+      <div><label class="field-label">Couleur du titre</label><input type="color" id="s_title_color" value="${state.settings.title_color || '#181816'}"></div>
+      <div><label class="field-label">Compteur d'indicateurs</label>
+        <label class="inline-check" style="margin-top:8px;"><input type="checkbox" id="s_show_count" ${state.settings.show_count !== false ? "checked" : ""}> Afficher</label>
+      </div>
+    </div>
+    <div class="form-row three">
+      <div><label class="field-label">Couleur d'accent</label><input type="color" id="s_color" value="${state.settings.accent_color || '#1F5C4A'}"></div>
+      <div><label class="field-label">Couleur de fond</label><input type="color" id="s_bg" value="${state.settings.bg_color || '#F6F5F1'}"></div>
+      <div><label class="field-label">Densité générale</label>
+        <div class="radio-row">
+          <label><input type="radio" name="s_density" value="comfortable" ${state.settings.density !== 'compact' ? 'checked' : ''}> Confortable</label>
+          <label><input type="radio" name="s_density" value="compact" ${state.settings.density === 'compact' ? 'checked' : ''}> Compacte</label>
+        </div>
+      </div>
+    </div>
+    <div><label class="field-label">Espacement entre le titre du tableau de bord et celui de la page</label>
+      <div class="radio-row">
+        <label><input type="radio" name="s_header_spacing" value="compact" ${state.settings.header_spacing === 'compact' ? 'checked' : ''}> Compact</label>
+        <label><input type="radio" name="s_header_spacing" value="normal" ${!state.settings.header_spacing || state.settings.header_spacing === 'normal' ? 'checked' : ''}> Normal</label>
+        <label><input type="radio" name="s_header_spacing" value="large" ${state.settings.header_spacing === 'large' ? 'checked' : ''}> Large</label>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;">
+      <label class="field-label" style="font-weight:600;">Style des cartes KPI (s'applique à toutes en même temps)</label>
+      <div class="form-row two" style="margin-top:8px;">
+        <div><label class="field-label">Taille des cartes</label>
+          <select id="s_card_size">
+            <option value="xs" ${state.settings.card_size === 'xs' ? 'selected' : ''}>Très petit</option>
+            <option value="sm" ${state.settings.card_size === 'sm' ? 'selected' : ''}>Petit</option>
+            <option value="md" ${!state.settings.card_size || state.settings.card_size === 'md' ? 'selected' : ''}>Moyen</option>
+            <option value="lg" ${state.settings.card_size === 'lg' ? 'selected' : ''}>Grand</option>
+          </select>
+        </div>
+        <div><label class="field-label">Taille de la valeur</label><select id="s_value_size">${FONT_SIZES.map(f => `<option value="${f.v}" ${(state.settings.kpi_value_size || 28) === f.v ? "selected" : ""}>${f.l}</option>`).join("")}</select></div>
+      </div>
+      <div class="form-row three" style="margin-top:10px;">
+        <div><label class="field-label">Taille du titre du KPI</label><select id="s_title_kpi_size">${FONT_SIZES.map(f => `<option value="${f.v}" ${(state.settings.kpi_title_size || 14) === f.v ? "selected" : ""}>${f.l}</option>`).join("")}</select></div>
+        <div><label class="inline-check" style="margin-top:22px;"><input type="checkbox" id="s_title_kpi_bold" ${state.settings.kpi_title_bold !== false ? "checked" : ""}> Gras</label></div>
+        <div><label class="inline-check" style="margin-top:22px;"><input type="checkbox" id="s_title_kpi_center" ${state.settings.kpi_title_center ? "checked" : ""}> Centré</label></div>
+      </div>
+    </div>
+    <div><label class="field-label">Changer le mot de passe d'édition</label><input type="password" id="s_password" placeholder="Laisser vide pour ne pas changer"></div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;">
+      <label class="field-label" style="color:var(--red);">Zone dangereuse</label>
+      <button class="btn btn-ghost" id="s_reset" style="border-color:var(--red);color:var(--red);width:100%;justify-content:center;">🗑 Réinitialiser tout le tableau de bord</button>
+    </div>
+    <div class="form-actions"><button class="btn btn-ghost" id="s_cancel">Fermer</button><button class="btn btn-primary" id="s_save">Enregistrer</button></div>`;
+  el.querySelector("#s_reset").onclick = async () => {
+    if (!confirm("Supprimer TOUTES les pages, KPIs et textes ? Cette action est irréversible.")) return;
+    if (!confirm("Dernière confirmation : il n'y a aucun moyen de récupérer ces données ensuite. Continuer ?")) return;
+    const { error } = await sb.from("pages").delete().neq("id", "__never_matches__");
+    if (error) { alert("Erreur : " + error.message); return; }
+    state.pages = []; state.kpis = []; state.blocks = []; state.activePageId = null; state._bootstrapped = false;
+    closeModal();
+    await loadAll();
+    render();
+  };
+  const logoUrlInput = el.querySelector("#s_logo_url");
+  const logoPreviewWrap = el.querySelector("#s_logo_preview_wrap");
+  const logoPreview = el.querySelector("#s_logo_preview");
+  function setLogo(dataUrl) {
+    logoUrlInput.value = dataUrl;
+    logoPreview.src = dataUrl;
+    logoPreviewWrap.style.display = "";
+  }
+  function handleLogoFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => setLogo(reader.result);
+    reader.readAsDataURL(file);
+  }
+  el.querySelector("#s_logo_paste_zone").addEventListener("paste", (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+      if (item.type.startsWith("image/")) { handleLogoFile(item.getAsFile()); e.preventDefault(); break; }
+    }
+  });
+  el.querySelector("#s_logo_file").addEventListener("change", (e) => handleLogoFile(e.target.files[0]));
+  el.querySelector("#s_logo_remove").onclick = () => { logoUrlInput.value = ""; logoPreviewWrap.style.display = "none"; };
+
+  el.querySelector("#s_cancel").onclick = () => { closeModal(); render(); };
+  el.querySelector("#s_save").onclick = async () => {
+    const title = el.querySelector("#s_title").value.trim() || "Tableau de bord";
+    const titleSize = parseInt(el.querySelector("#s_title_size").value, 10);
+    const titleColor = el.querySelector("#s_title_color").value;
+    const showCount = el.querySelector("#s_show_count").checked;
+    const color = el.querySelector("#s_color").value;
+    const bgColor = el.querySelector("#s_bg").value;
+    const density = el.querySelector('input[name="s_density"]:checked').value;
+    const headerSpacing = el.querySelector('input[name="s_header_spacing"]:checked').value;
+    const cardSize = el.querySelector("#s_card_size").value;
+    const valueSize = parseInt(el.querySelector("#s_value_size").value, 10);
+    const kpiTitleSize = parseInt(el.querySelector("#s_title_kpi_size").value, 10);
+    const kpiTitleBold = el.querySelector("#s_title_kpi_bold").checked;
+    const kpiTitleCenter = el.querySelector("#s_title_kpi_center").checked;
+    const newPassword = el.querySelector("#s_password").value.trim();
+    const logoUrl = el.querySelector("#s_logo_url").value.trim();
+    const logoSize = el.querySelector("#s_logo_size").value;
+    const logoGap = el.querySelector("#s_logo_gap").value;
+    const update = {
+      dashboard_title: title, title_font_size: titleSize, title_color: titleColor, show_count: showCount,
+      accent_color: color, bg_color: bgColor, density, header_spacing: headerSpacing,
+      card_size: cardSize, kpi_value_size: valueSize, kpi_title_size: kpiTitleSize,
+      kpi_title_bold: kpiTitleBold, kpi_title_center: kpiTitleCenter,
+      logo_url: logoUrl || null, logo_size: logoSize, logo_gap: logoGap,
+    };
+    if (newPassword) update.edit_password = newPassword;
+    const { error } = await sb.from("settings").update(update).eq("id", 1);
+    if (error) { alert("Erreur : " + error.message); return; }
+    Object.assign(state.settings, update);
+    closeModal(); render();
+  };
+  openModal(el);
+}
+
+// ---------- Événements globaux ----------
+document.getElementById("addKpiBtn").onclick = () => { if (!state.unlocked) { openPasswordModal(); return; } state.editingId = "new"; render(); };
+document.getElementById("lockPill").onclick = () => { if (!state.unlocked) openPasswordModal(); };
+document.getElementById("settingsBtn").onclick = () => { if (state.unlocked) openSettingsModal(); else openPasswordModal(); };
+
+async function normalizeOrderIndexes() {
+  const updates = [];
+  state.pages.forEach(page => {
+    const items = [
+      ...state.kpis.filter(k => k.page_id === page.id).map(k => ({ type: "kpi", obj: k })),
+      ...state.blocks.filter(b => b.page_id === page.id).map(b => ({ type: "block", obj: b })),
+    ];
+    items.sort((a, b) => {
+      const oa = a.obj.order_index ?? a.obj.position ?? 0;
+      const ob = b.obj.order_index ?? b.obj.position ?? 0;
+      if (oa !== ob) return oa - ob;
+      if (a.type !== b.type) return a.type === "kpi" ? -1 : 1;
+      return (a.obj.position ?? 0) - (b.obj.position ?? 0);
+    });
+    items.forEach((it, i) => {
+      if (it.obj.order_index !== i) {
+        it.obj.order_index = i;
+        updates.push(sb.from(it.type === "kpi" ? "kpis" : "blocks").update({ order_index: i }).eq("id", it.obj.id));
+      }
+    });
+  });
+  if (updates.length) await Promise.all(updates);
+}
+
+(async function init() {
+  try { await loadAll(); await normalizeOrderIndexes(); render(); } catch (err) { showConnectionError(err); }
+})();
+</script>
+</body>
+</html>
