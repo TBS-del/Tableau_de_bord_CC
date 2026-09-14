@@ -255,20 +255,30 @@ function descendantsOf(pageId) {
   return out;
 }
 
-function computeFormulaValue(kpi, field) {
+function resolveKpiFieldValue(kpiObj, field, seen) {
+  if (!kpiObj) return null;
+  if (!kpiObj.is_formula) return kpiObj[field];
+  if (seen.has(kpiObj.id)) return null; // évite une boucle si des KPI se référencent en cercle
+  seen.add(kpiObj.id);
+  return computeFormulaValue(kpiObj, field, seen);
+}
+
+function computeFormulaValue(kpi, field, seen) {
+  seen = seen || new Set([kpi.id]);
   const sources = (kpi.formula_sources || []).map(id => state.kpis.find(k => k.id === id)).filter(Boolean);
   if (sources.length === 0) return null;
   if (kpi.formula_op === "weighted_avg") {
     const weights = kpi.formula_weights || {};
     let weightedSum = 0, weightTotal = 0;
     sources.forEach(s => {
+      const val = resolveKpiFieldValue(s, field, seen);
       const w = Number(weights[s.id] ?? 1);
-      weightedSum += Number(s[field] ?? 0) * w;
+      weightedSum += Number(val ?? 0) * w;
       weightTotal += w;
     });
     return weightTotal > 0 ? weightedSum / weightTotal : null;
   }
-  const vals = sources.map(s => Number(s[field] ?? 0));
+  const vals = sources.map(s => Number(resolveKpiFieldValue(s, field, seen) ?? 0));
   const sum = vals.reduce((a, b) => a + b, 0);
   return kpi.formula_op === "avg" ? sum / vals.length : sum;
 }
@@ -778,6 +788,7 @@ function buildKpiForm(initial) {
       <div id="colorWrapFormula" style="margin-top:8px;display:${useCustomColor ? "" : "none"};"><input type="color" id="f_color_formula" value="${initial?.custom_color || '#1F5C4A'}"></div>
       <label class="field-label" style="margin-top:12px;">KPIs à agréger (depuis n'importe quelle page)</label>
       <div class="checkbox-list" id="sourceList"></div>
+      <div id="weightedPreview" style="font-size:12px;color:var(--text-secondary);margin-top:8px;line-height:1.6;"></div>
     </div>
 
     <div>
@@ -838,11 +849,43 @@ function buildKpiForm(initial) {
       };
     });
     const sourceListEl = wrap.querySelector("#sourceList");
+    const previewEl = wrap.querySelector("#weightedPreview");
     renderSourceList(sourceListEl, initial?.formula_sources || [], initial?.formula_weights || {});
     const opRadios = wrap.querySelectorAll('input[name="f_op"]');
+
+    function updatePreview() {
+      const op = wrap.querySelector('input[name="f_op"]:checked').value;
+      const checked = Array.from(sourceListEl.querySelectorAll('input[type=checkbox]:checked'));
+      if (checked.length === 0) { previewEl.innerHTML = ""; return; }
+      let lines = [];
+      let weightedSum = 0, weightTotal = 0, plainSum = 0;
+      checked.forEach(cb => {
+        const id = cb.value;
+        const src = state.kpis.find(k => k.id === id);
+        const val = src ? Number(src.value ?? 0) : 0;
+        plainSum += val;
+        if (op === "weighted_avg") {
+          const inp = sourceListEl.querySelector(`.source-weight[data-kpi-id="${id}"]`);
+          const w = inp && !isNaN(parseFloat(inp.value)) ? parseFloat(inp.value) : 1;
+          weightedSum += val * w;
+          weightTotal += w;
+          lines.push(`${escapeHtml(src ? src.name : "?")} : ${val} × ${w} = ${(val * w).toFixed(2)}`);
+        } else {
+          lines.push(`${escapeHtml(src ? src.name : "?")} : ${val}`);
+        }
+      });
+      let result;
+      if (op === "weighted_avg") result = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
+      else if (op === "avg") result = plainSum / checked.length;
+      else result = plainSum;
+      previewEl.innerHTML = lines.join("<br>") + `<br><strong>Résultat en direct : ${result.toFixed(2)}</strong>`;
+    }
+    opRadios.forEach(r => r.onchange = () => { syncWeightVisibility(); updatePreview(); });
+    sourceListEl.addEventListener("change", updatePreview);
+    sourceListEl.addEventListener("input", updatePreview);
     const syncWeightVisibility = () => toggleWeightInputs(sourceListEl, wrap.querySelector('input[name="f_op"]:checked').value === "weighted_avg");
-    opRadios.forEach(r => r.onchange = syncWeightVisibility);
     syncWeightVisibility();
+    updatePreview();
     const hasTargetFormulaCb = wrap.querySelector("#f_hasTarget_formula");
     const targetWrapFormula = wrap.querySelector("#targetWrapFormula");
     hasTargetFormulaCb.onchange = () => { targetWrapFormula.style.display = hasTargetFormulaCb.checked ? "" : "none"; };
@@ -922,7 +965,8 @@ async function saveKpiFromForm(wrap, initial) {
     const weights = {};
     sources.forEach(id => {
       const inp = wrap.querySelector(`.source-weight[data-kpi-id="${id}"]`);
-      weights[id] = inp ? (parseFloat(inp.value) || 1) : 1;
+      const parsed = inp ? parseFloat(inp.value) : NaN;
+      weights[id] = isNaN(parsed) ? 1 : parsed;
     });
     const hasTargetFormula = wrap.querySelector("#f_hasTarget_formula").checked;
     const useColorFormula = wrap.querySelector("#f_useColor_formula").checked;
