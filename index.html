@@ -850,7 +850,7 @@ function buildKpiForm(initial) {
     });
     const sourceListEl = wrap.querySelector("#sourceList");
     const previewEl = wrap.querySelector("#weightedPreview");
-    renderSourceList(sourceListEl, initial?.formula_sources || [], initial?.formula_weights || {});
+    renderSourceList(sourceListEl, initial?.formula_sources || [], initial?.formula_weights || {}, initial?.id);
     const opRadios = wrap.querySelectorAll('input[name="f_op"]');
 
     function updatePreview() {
@@ -862,7 +862,8 @@ function buildKpiForm(initial) {
       checked.forEach(cb => {
         const id = cb.value;
         const src = state.kpis.find(k => k.id === id);
-        const val = src ? Number(src.value ?? 0) : 0;
+        const rawVal = src ? (src.is_formula ? computeFormulaValue(src, "value") : src.value) : 0;
+        const val = Number(rawVal ?? 0);
         plainSum += val;
         if (op === "weighted_avg") {
           const inp = sourceListEl.querySelector(`.source-weight[data-kpi-id="${id}"]`);
@@ -923,10 +924,10 @@ function resolveUnit(wrap, selectId = "f_unit", customId = "f_unit_custom") {
   if (sel === "__custom__") { const c = wrap.querySelector("#" + customId); return c ? c.value.trim() : ""; }
   return sel;
 }
-function renderSourceList(container, selectedIds, weights) {
+function renderSourceList(container, selectedIds, weights, excludeId) {
   container.innerHTML = "";
   state.pages.forEach(p => {
-    const kpis = state.kpis.filter(k => k.page_id === p.id && !k.is_formula);
+    const kpis = state.kpis.filter(k => k.page_id === p.id && k.id !== excludeId);
     if (kpis.length === 0) return;
     const title = document.createElement("div");
     title.className = "checkbox-group-title";
